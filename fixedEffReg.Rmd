@@ -1,0 +1,109 @@
+---
+title: "Fixed Effect Panel Regression"
+output: html_notebook
+---
+
+```{r}
+install.packages('cancensus')
+install.packages('sf')
+```
+
+```{r}
+library(cancensus)
+library(sf)
+```
+
+```{r}
+census <- read_sf('census_index_crime.geojson')
+```
+
+```{r}
+library(data.table)
+library(fixest)
+
+crime <- fread("econ_398_project/Processed_Aggregate_Crime_Data/crime_in_vancouver_with_division.csv")
+crime[, date := sprintf("%d-%02d", YEAR, MONTH)]
+
+ntl <- fread("econ_398_project/NTL_data/NASA_ntl_2012_2024_monthly.csv")
+ntl[, date := as.character(date)]
+ntlDT <- ntl[,c('name','ntl_mean','date')]
+print(ntlDT)
+```
+
+```{r}
+
+crimeDT <- as.data.table(crime)
+crimeDT <- crimeDT[,c('name','date','time_category')]
+crimeDT <-crimeDT[, .(count = .N), by = .(date, name, time_category)]
+print(crimeDT)
+
+```
+
+
+```{r}
+setkey(crimeDT, date)
+setkey(ntlDT, date)
+print(ntlDT)
+print(crimeDT)
+dt <- merge(crimeDT, ntlDT, by = c("date","name"), all.x = TRUE)
+# Convert 'date' to a factor for time fixed effects
+dt[, date := as.factor(date)]
+print(dt)
+```
+```{r}
+census <- as.data.table(census)
+dt[, name := as.character(name)]
+census[, name := as.character(name)]
+dt <- merge(dt, census, by = c("name"), all.x = TRUE)
+print(dt)
+```
+
+
+```{r}
+# Run fixed effects regression for daytime crime rate
+
+dayDT<- dt[time_category == 'day']
+dayDT[, date := as.factor(date)]
+dayDT[, mean_land_value := as.numeric(mean_land_value)]
+dayDT[, income := as.numeric(income)]
+dayDT[, immigrant_prop := as.numeric(immigrant_prop)]
+dayDT[, education_prop := as.numeric(education_prop)]
+print(dayDT)
+```
+
+
+```{r}
+library(fixest)
+model_day <- feols(
+  count ~ ntl_mean +
+  +log(mean_land_value) 
+  +log(school_index) 
+  +log(cultural_space_index) 
+  +log(income) 
+  +log(age) 
+  +log(population_density) 
+  +immigrant_prop 
+  +education_prop
+    | date
+  data = dayDT
+)
+summary(model_day)
+```
+
+```{r}
+nightDT<- dt[time_category == 'night']
+
+# Run fixed effects regression for nighttime crime rate
+model_night <- feols(
+  night_time_crime_rate ~ nighttime_luminosity_pct_change +
+    log_mean_land_value + log_school_index + log_cultural_space_index +
+    log_income + log_mean_age + log_population_density +
+    immigrant_proportion + education_proportion +
+    containing_insite + is_downtown | date,
+  data = dt
+)
+
+summary(model_day)
+summary(model_night)
+```
+
